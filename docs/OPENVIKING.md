@@ -118,6 +118,10 @@ make doctor
 make dev
 ```
 
+`make doctor` validates `memory.backend_config` for the selected OpenViking
+manager, so a stale block (for example DeerMem keys left behind after switching
+backends) fails the check instead of surfacing on the first agent turn.
+
 DeerFlow is available at <http://localhost:2026>. OpenViking Studio is
 available at <http://localhost:1933/studio>.
 

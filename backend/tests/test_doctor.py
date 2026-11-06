@@ -1337,3 +1337,64 @@ class TestMainConfigResolution:
             assert exit_code == 1
             assert "✗ config.yaml found" in output
             assert str(Path("~/cfg.yaml")) in output
+
+
+# ---------------------------------------------------------------------------
+
+
+# check_memory_config
+# ---------------------------------------------------------------------------
+
+
+def _write_config(tmp_path: Path, body: str) -> Path:
+    path = tmp_path / "config.yaml"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_memory_check_skips_a_non_openviking_backend(tmp_path: Path) -> None:
+    config = _write_config(
+        tmp_path,
+        """memory:
+  manager_class: deerflow.agents.memory.deermem.DeerMemManager
+""",
+    )
+
+    [result] = doctor.check_memory_config(config)
+
+    assert result.status == "skip"
+
+
+def test_memory_check_fails_on_stale_deermem_keys_for_openviking(tmp_path: Path) -> None:
+    config = _write_config(
+        tmp_path,
+        """memory:
+  manager_class: deerflow.agents.memory.backends.openviking.OpenVikingMemoryManager
+  backend_config:
+    top_k: 20
+""",
+    )
+
+    [result] = doctor.check_memory_config(config)
+
+    assert result.status == "fail"
+    assert "Unknown OpenViking backend_config fields" in result.detail
+
+
+def test_memory_check_accepts_a_valid_openviking_config(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OPENVIKING_API_KEY", "test-key")
+    config = _write_config(
+        tmp_path,
+        """memory:
+  manager_class: deerflow.agents.memory.backends.openviking.OpenVikingMemoryManager
+  backend_config:
+    base_url: http://127.0.0.1:1933
+    owner_user_id: user-1
+    api_key_env: OPENVIKING_API_KEY
+""",
+    )
+
+    [result] = doctor.check_memory_config(config)
+
+    assert result.status == "ok"
+    assert "127.0.0.1:1933" in result.detail

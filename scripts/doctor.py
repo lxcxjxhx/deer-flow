@@ -413,6 +413,53 @@ def check_config_loadable(config_path: Path) -> CheckResult:
         )
 
 
+def check_memory_config(config_path: Path) -> list[CheckResult]:
+    """Preflight the selected memory backend's ``backend_config``.
+
+    The shared ``MemoryConfig`` keeps ``backend_config`` untyped, so a stale
+    block (for example DeerMem keys left behind after switching to OpenViking)
+    only surfaces when ``MemoryMiddleware`` builds the backend after the first
+    model call. Validating here turns that late failure into a diagnostic.
+    """
+    label = "memory backend"
+    if not config_path.exists():
+        return [CheckResult(label, "skip")]
+
+    try:
+        raw = _load_yaml_file(config_path)
+    except (OSError, ValueError):
+        return [CheckResult(label, "skip")]
+
+    memory = raw.get("memory")
+    if not isinstance(memory, dict):
+        return [CheckResult(label, "skip")]
+    manager_class = str(memory.get("manager_class") or "").strip().lower()
+    if "openviking" not in manager_class:
+        return [CheckResult(label, "skip")]
+    if memory.get("enabled") is False:
+        return [CheckResult(label, "skip", "memory.enabled is false")]
+
+    try:
+        from deerflow.agents.memory.backends.openviking.config import (
+            OpenVikingConfig,
+        )
+
+        backend = OpenVikingConfig.from_backend_config(memory.get("backend_config"))
+    except ValueError as exc:
+        return [
+            CheckResult(
+                label,
+                "fail",
+                f"OpenViking backend_config is invalid: {exc}",
+                fix=("Replace memory.backend_config with the OpenViking block from config.example.yaml; DeerMem keys are not accepted."),
+            )
+        ]
+    except Exception as exc:  # pragma: no cover - import/runtime failure
+        return [CheckResult(label, "fail", str(exc))]
+
+    return [CheckResult(label, "ok", f"OpenViking ({backend.base_url})")]
+
+
 def check_llm_api_key(config_path: Path) -> list[CheckResult]:
     """Check that each model's env var is set in the environment."""
     if not config_path.exists():
@@ -934,6 +981,9 @@ def main() -> int:
         *check_llm_package(config_path),
     ]
     sections.append(("LLM Provider", llm_checks))
+
+    # ── Memory ───────────────────────────────────────────────────────────────
+    sections.append(("Memory", check_memory_config(config_path)))
 
     # ── Web Capabilities ─────────────────────────────────────────────────────
     search_checks = [
