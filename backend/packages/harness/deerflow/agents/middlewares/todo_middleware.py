@@ -375,6 +375,12 @@ class TodoMiddleware(TodoListMiddleware):
         if not todos or all(t.get("status") == "completed" for t in todos):
             return None
 
+        # A hard stop (loop/token/safety cap) already terminalized this run.
+        # Jumping back to the model would spend more calls and tool invocations
+        # after the cap fired, so the reminder must not override it.
+        if self._run_hard_stopped(runtime):
+            return None
+
         # 4. Enforce a reminder cap to prevent infinite re-engagement loops.
         if self._completion_reminder_count_for_runtime(runtime) >= self._MAX_COMPLETION_REMINDERS:
             return None
@@ -394,6 +400,17 @@ class TodoMiddleware(TodoListMiddleware):
     ) -> dict[str, Any] | None:
         """Async version of after_model."""
         return self.after_model(state, runtime)
+
+    @staticmethod
+    def _run_hard_stopped(runtime: Runtime) -> bool:
+        """Whether a capped middleware already ended this run.
+
+        ``LoopDetectionMiddleware`` and ``SafetyFinishReasonMiddleware`` stamp
+        ``stop_reason`` on ``runtime.context`` when they hard-stop a run; a todo
+        completion reminder must not re-enter the model afterwards.
+        """
+        ctx = getattr(runtime, "context", None)
+        return isinstance(ctx, dict) and bool(ctx.get("stop_reason"))
 
     @staticmethod
     def _format_pending_completion_reminders(reminders: list[str]) -> str:

@@ -346,6 +346,19 @@ class TestAfterModel:
         }
         assert mw.after_model(state, _make_runtime()) is None
 
+    @pytest.mark.parametrize("stop_reason", ["loop_capped", "safety_capped"])
+    def test_hard_stopped_run_does_not_re_enter_the_model(self, stop_reason):
+        mw = TodoMiddleware()
+        runtime = _make_runtime()
+        runtime.context["stop_reason"] = stop_reason
+        state = {
+            "messages": [HumanMessage(content="hi"), _ai_no_tool_calls()],
+            "todos": _incomplete_todos(),
+        }
+
+        assert mw.after_model(state, runtime) is None
+        assert mw._drain_completion_reminders(runtime) == []
+
     def test_queues_reminder_and_jumps_to_model_when_incomplete(self):
         mw = TodoMiddleware()
         runtime = _make_runtime()
