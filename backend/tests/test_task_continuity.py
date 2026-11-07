@@ -1002,3 +1002,25 @@ async def test_active_search_excerpt_keeps_overlapping_fitting_occurrence(role_r
     read_arguments = {"runtime": role_runtime, "source_id": row["id"], "offset": row["excerpt_start"]}
     page = json.loads(await history_read.ainvoke(read_arguments) if async_mode else history_read.invoke(read_arguments))
     assert page["text"].startswith(row["excerpt"])
+
+
+def test_lookup_dedupes_a_repeated_source_before_the_result_budget(scoped):
+    """One source archived in many batches must not consume the eight-row budget."""
+    config = TaskContinuityConfig(enabled=True)
+    duplicate = HumanMessage(content="duplicate needle ALPHA", id="dup")
+    other = HumanMessage(content="distinct needle BETA", id="other")
+    history = {}
+    for index in range(8):
+        history = archive.capture(
+            {"task_history": history},
+            scoped,
+            [duplicate, HumanMessage(content=f"filler {index}", id=f"f{index}")],
+            config,
+        )
+    history = archive.capture({"task_history": history}, scoped, [other], config)
+
+    result = archive.lookup({"task_history": history}, scoped, query="needle")
+
+    ids = [row["id"] for row in result["results"]]
+    assert len(ids) == len(set(ids)) == 2
+    assert {row["text"] for row in result["results"]} == {"duplicate needle ALPHA", "distinct needle BETA"}

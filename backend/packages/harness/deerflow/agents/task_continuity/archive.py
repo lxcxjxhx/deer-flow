@@ -216,7 +216,17 @@ def lookup(state: dict, runtime, *, query: str | None = None, source_id: str | N
                     match = " OR ".join('"' + term.replace('"', '""') + '"' for term in keywords)
                     role_filter = " AND json_extract(payload, '$.role') = ?" if role is not None else ""
                     parameters = [match, *batches, *([role] if role is not None else []), 8]
-                    rows = db.execute(f"SELECT payload FROM sources WHERE sources MATCH ? AND batch IN ({placeholders}){role_filter} ORDER BY rank LIMIT ?", parameters)
+                    # One source can be archived in several reachable batches. Rank
+                    # and dedupe inside SQL so those copies cannot consume the
+                    # result budget before the per-source dictionary sees them.
+                    rows = db.execute(
+                        "SELECT payload FROM ("
+                        " SELECT payload, rank, rowid AS ordinal,"
+                        " ROW_NUMBER() OVER (PARTITION BY id ORDER BY rank, rowid) AS rn"
+                        f" FROM sources WHERE sources MATCH ? AND batch IN ({placeholders}){role_filter}"
+                        ") WHERE rn = 1 ORDER BY rank, ordinal LIMIT ?",
+                        parameters,
+                    )
                 for (payload,) in rows:
                     row = json.loads(payload)
                     found[row["id"]] = row
