@@ -109,6 +109,26 @@ def test_sql_signature_detects_update_behind_existing_max_timestamp(sql_store):
     assert sql_store.signature() != before
 
 
+def test_sql_signature_changes_when_a_write_shares_the_clock_tick(sql_store, monkeypatch):
+    frozen = datetime(2026, 11, 9, 0, 0, 0, tzinfo=UTC)
+
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return frozen if tz is None else frozen.astimezone(tz)
+
+    monkeypatch.setattr("deerflow.persistence.managed_subagents.model.datetime", FrozenDatetime)
+
+    sql_store.create(_definition("same-tick"))
+    before = sql_store.signature()
+
+    updated = sql_store.get("same-tick").model_copy(update={"description": "Written in the same tick"})
+    sql_store.update(updated)
+
+    assert sql_store.get("same-tick").description == "Written in the same tick"
+    assert sql_store.signature() != before
+
+
 @pytest.mark.parametrize("store_fixture", ["file_store", "sql_store"])
 def test_duplicate_create_is_a_conflict(request, store_fixture):
     store = request.getfixturevalue(store_fixture)
